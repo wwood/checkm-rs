@@ -69,17 +69,17 @@ pub struct CheckMResult {
     pub genome_to_quality: BTreeMap<String,GenomeQuality>,
 }
 
-#[derive(Debug,PartialEq)]
+#[derive(Debug,PartialEq,Clone,Copy)]
 pub struct GenomeQuality {
     pub completeness: f32,
     pub contamination: f32,
 }
 
 impl CheckMResult {
-    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<&GenomeQuality,()> {
+    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<GenomeQuality,()> {
         let checkm_name = std::path::Path::new(fasta_path).file_stem().unwrap().to_str().unwrap();
         match self.genome_to_quality.get(checkm_name) {
-            Some(q) => Ok(q),
+            Some(q) => Ok(*q),
             None => Err(())
         }
     }
@@ -106,7 +106,7 @@ mod test {
         init();
         let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm.tsv");
         assert_eq!(
-            Ok(&GenomeQuality {
+            Ok(GenomeQuality {
                 completeness: 83.38/100.,
                 contamination: 0.,
             }),
