@@ -69,10 +69,20 @@ pub struct CheckMResult {
     pub genome_to_quality: BTreeMap<String,GenomeQuality>,
 }
 
-#[derive(Debug)]
+#[derive(Debug,PartialEq)]
 pub struct GenomeQuality {
     pub completeness: f32,
     pub contamination: f32,
+}
+
+impl CheckMResult {
+    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<&GenomeQuality,()> {
+        let checkm_name = std::path::Path::new(fasta_path).file_stem().unwrap().to_str().unwrap();
+        match self.genome_to_quality.get(checkm_name) {
+            Some(q) => Ok(q),
+            None => Err(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -89,5 +99,20 @@ mod test {
         assert_eq!(
             vec!["GUT_GENOME006390.gff","GUT_GENOME011264.gff","GUT_GENOME011296.gff","GUT_GENOME011536.gff"], 
             CheckMTabTable::good_quality_genome_names(&"tests/data/checkm.tsv",0.56,0.1))
+    }
+
+    #[test]
+    fn test_retrieve() {
+        init();
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm.tsv");
+        assert_eq!(
+            Ok(&GenomeQuality {
+                completeness: 83.38/100.,
+                contamination: 0.,
+            }),
+            checkm.retrieve_via_fasta_path(&"/some/path/GUT_GENOME011264.gff.fna"));
+        assert_eq!(
+            Err(()),
+            checkm.retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna"));
     }
 }
