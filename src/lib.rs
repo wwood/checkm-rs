@@ -69,6 +69,28 @@ pub struct CheckMResult {
     pub genome_to_quality: BTreeMap<String,GenomeQuality>,
 }
 
+impl CheckMResult {
+    pub fn order_genomes_by_completeness_minus_4contamination(&self) -> Vec<&String> {
+        let mut genomes_and_qualities: Vec<_> = self.genome_to_quality.iter().map(|(genome,quality)| (genome,quality)).collect();
+
+        // sort in reverse order
+        genomes_and_qualities.sort_unstable_by(|(_,q1),(_,q2)| 
+            (q2.completeness - 4.*q2.contamination).partial_cmp(
+                &(q1.completeness - 4.*q1.contamination)).unwrap());
+        return genomes_and_qualities.into_iter().map(|(genome,_)| genome).collect();
+    }
+
+    pub fn order_genomes_by_completeness_minus_5contamination(&self) -> Vec<&String> {
+        let mut genomes_and_qualities: Vec<_> = self.genome_to_quality.iter().map(|(genome,quality)| (genome,quality)).collect();
+
+        // sort in reverse order
+        genomes_and_qualities.sort_unstable_by(|(_,q1),(_,q2)| 
+            (q2.completeness - 5.*q2.contamination).partial_cmp(
+                &(q1.completeness - 5.*q1.contamination)).unwrap());
+        return genomes_and_qualities.into_iter().map(|(genome,_)| genome).collect();
+    }
+}
+
 #[derive(Debug,PartialEq,Clone,Copy)]
 pub struct GenomeQuality {
     pub completeness: f32,
@@ -114,5 +136,32 @@ mod test {
         assert_eq!(
             Err(()),
             checkm.retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna"));
+    }
+
+    #[test]
+    fn test_ordering_4times() {
+        init();
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm.tsv");
+        assert_eq!(
+            vec!["GUT_GENOME006390.gff","GUT_GENOME011264.gff","GUT_GENOME011296.gff","GUT_GENOME011367.gff","GUT_GENOME011536.gff"],
+            checkm.order_genomes_by_completeness_minus_4contamination());
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm2.tsv");
+        assert_eq!(
+            vec!["GUT_GENOME006390.gff","GUT_GENOME011264.gff","GUT_GENOME011296.gff","GUT_GENOME011536.gff","GUT_GENOME011367.gff"],
+            checkm.order_genomes_by_completeness_minus_4contamination());
+    }
+
+    #[test]
+    fn test_ordering_5times() {
+        init();
+        // Cheating here a bit - same result as the minus_4times
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm.tsv");
+        assert_eq!(
+            vec!["GUT_GENOME006390.gff","GUT_GENOME011264.gff","GUT_GENOME011296.gff","GUT_GENOME011367.gff","GUT_GENOME011536.gff"],
+            checkm.order_genomes_by_completeness_minus_5contamination());
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm2.tsv");
+        assert_eq!(
+            vec!["GUT_GENOME006390.gff","GUT_GENOME011264.gff","GUT_GENOME011296.gff","GUT_GENOME011536.gff","GUT_GENOME011367.gff"],
+            checkm.order_genomes_by_completeness_minus_5contamination());
     }
 }
