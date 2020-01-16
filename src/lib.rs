@@ -139,6 +139,19 @@ impl CheckMResult {
         fasta_and_order.sort_unstable_by(|a,b| a.1.cmp(&b.1));
         return Ok(fasta_and_order.into_iter().map(|(g,_)| g).collect())
     }
+
+    pub fn filter(&self, min_completeness:f32, max_contamination:f32) -> CheckMResult {
+        let mut new = BTreeMap::new();
+
+        for (g,q) in self.genome_to_quality.iter() {
+            if q.completeness >= min_completeness && q.contamination <= max_contamination {
+                new.insert(g.clone().to_string(),*q);
+            }
+        }
+        return CheckMResult {
+            genome_to_quality: new
+        }
+    }
 }
 
 #[derive(Debug,PartialEq,Clone,Copy)]
