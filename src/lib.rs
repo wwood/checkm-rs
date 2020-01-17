@@ -91,37 +91,47 @@ impl CheckMResult {
     }
 
     /// Map paths to FASTA paths to CheckM qualities, and return paths ordered
-    /// by their quality, where quality is completeness - 4*contamination.
+    /// by their quality, where quality is completeness - 4*contamination. If
+    /// not None, min_completeness and max_contamination specify thresholds as
+    /// fractions e.g. 0.8 not 80.
     pub fn order_fasta_paths_by_completeness_minus_4contamination<'a>(
         &self,
-        genome_fasta_files: &Vec<&'a str>
+        genome_fasta_files: &Vec<&'a str>,
+        min_completeness: Option<f32>,
+        max_contamination: Option<f32>
     ) -> Result<Vec<&'a str>,String> {
 
         let mut key_to_order = BTreeMap::new();
         for (i,key) in self.order_genomes_by_completeness_minus_4contamination().into_iter().enumerate() {
             key_to_order.insert(key.as_str(), i);
         }
-        self.order_fasta_list(&key_to_order, genome_fasta_files)
+        self.order_fasta_list(&key_to_order, genome_fasta_files, min_completeness, max_contamination)
     }
 
     /// Map paths to FASTA paths to CheckM qualities, and return paths ordered
-    /// by their quality, where quality is completeness - 5*contamination.
+    /// by their quality, where quality is completeness - 5*contamination. If
+    /// not None, min_completeness and max_contamination specify thresholds as
+    /// fractions e.g. 0.8 not 80.
     pub fn order_fasta_paths_by_completeness_minus_5contamination<'a>(
         &self,
-        genome_fasta_files: &Vec<&'a str>
+        genome_fasta_files: &Vec<&'a str>,
+        min_completeness: Option<f32>,
+        max_contamination: Option<f32>
     ) -> Result<Vec<&'a str>,String> {
 
         let mut key_to_order = BTreeMap::new();
         for (i,key) in self.order_genomes_by_completeness_minus_5contamination().into_iter().enumerate() {
             key_to_order.insert(key.as_str(), i);
         }
-        self.order_fasta_list(&key_to_order, genome_fasta_files)
+        self.order_fasta_list(&key_to_order, genome_fasta_files, min_completeness, max_contamination)
     }
 
     fn order_fasta_list<'a>(
         &self,
         key_to_order: &BTreeMap<&str,usize>,
-        genome_fasta_files: &Vec<&'a str>)
+        genome_fasta_files: &Vec<&'a str>,
+        min_completeness: Option<f32>,
+        max_contamination: Option<f32>)
         -> Result<Vec<&'a str>,String> {
 
         let mut fasta_and_order: Vec<(&str,usize)> = vec![];
@@ -129,7 +139,13 @@ impl CheckMResult {
             let checkm_name = std::path::Path::new(fasta_path).file_stem().unwrap().to_str().unwrap();
             match key_to_order.get(checkm_name) {
                 Some(rank) => {
-                    fasta_and_order.push((*fasta_path,*rank))
+                    if (min_completeness.is_none() || 
+                        self.genome_to_quality[checkm_name].completeness >= min_completeness.unwrap()) &&
+                        (max_contamination.is_none() || 
+                        self.genome_to_quality[checkm_name].contamination <= max_contamination.unwrap()) {
+
+                        fasta_and_order.push((*fasta_path,*rank))
+                    }
                 },
                 None => {
                     return Err(format!("Unable to find quality for genome fasta file {}",fasta_path));
@@ -235,13 +251,31 @@ mod test {
         assert_eq!(
             vec!["/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011264.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011367.gff.fna","GUT_GENOME011536.gff.fna"],
             checkm.order_fasta_paths_by_completeness_minus_4contamination(
-                &vec!["GUT_GENOME011264.gff.fna","/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011367.gff.fna","GUT_GENOME011536.gff.fna"]
+                &vec!["GUT_GENOME011264.gff.fna","/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011367.gff.fna","GUT_GENOME011536.gff.fna"],
+                None,
+                None,
             ).unwrap());
         let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm2.tsv");
         assert_eq!(
             vec!["/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011264.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011536.gff.fna","GUT_GENOME011367.gff.fna"],
             checkm.order_fasta_paths_by_completeness_minus_4contamination(
-                &vec!["GUT_GENOME011264.gff.fna","/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011367.gff.fna","GUT_GENOME011536.gff.fna"]
+                &vec!["GUT_GENOME011264.gff.fna","/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011367.gff.fna","GUT_GENOME011536.gff.fna"],
+                None,
+                None,
+            ).unwrap());
+    }
+
+
+    #[test]
+    fn test_fasta_ordering_4times_min_completeness() {
+        init();
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm.tsv");
+        assert_eq!(
+            vec!["/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011264.gff.fna","GUT_GENOME011296.gff.fna"],
+            checkm.order_fasta_paths_by_completeness_minus_4contamination(
+                &vec!["GUT_GENOME011264.gff.fna","/tmp/GUT_GENOME006390.gff.fna","GUT_GENOME011296.gff.fna","GUT_GENOME011367.gff.fna","GUT_GENOME011536.gff.fna"],
+                Some(0.7),
+                None,
             ).unwrap());
     }
 }
