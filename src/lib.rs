@@ -43,12 +43,14 @@ impl CheckMTabTable {
             }
             let completeness: f32 = res[11].parse::<f32>().expect("Error parsing completeness in checkm tab table");
             let contamination: f32 = res[12].parse::<f32>().expect("Error parsing contamination in checkm tab table");
+            let strain_heterogeneity: f32 = res[13].parse::<f32>().expect("Error parsing contamination in checkm tab table");
             trace!("For {}, found completeness {} and contamination {}", &res[0], completeness, contamination);
             match qualities.insert(
                 res[0].to_string(),
                 GenomeQuality { 
                     completeness: completeness/100.,
                     contamination: contamination/100.,
+                    strain_heterogeneity: strain_heterogeneity/100.,
                 }) {
                 None => {},
                 Some(_) => {
@@ -174,6 +176,7 @@ impl CheckMResult {
 pub struct GenomeQuality {
     pub completeness: f32,
     pub contamination: f32,
+    pub strain_heterogeneity: f32,
 }
 
 impl CheckMResult {
@@ -210,6 +213,7 @@ mod test {
             Ok(GenomeQuality {
                 completeness: 83.38/100.,
                 contamination: 0.,
+                strain_heterogeneity: 0.
             }),
             checkm.retrieve_via_fasta_path(&"/some/path/GUT_GENOME011264.gff.fna"));
         assert_eq!(
