@@ -1,6 +1,6 @@
 [package]
 name = "checkm"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Ben J Woodcroft <donttrustben@gmail.com>"]
 edition = "2018"
 license = "GPL-3.0"
