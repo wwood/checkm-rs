@@ -1,0 +1,3 @@
+Bin Id	Marker lineage	# genomes	# markers	# marker sets	0	1	2	3	4	5+	Completeness	Contamination	Strain heterogeneity
+/tmp/GUT_GENOME006390.gff	o__Bacteroidales (UID2716)	92	487	270	27	459	1	0	0	0	93.61	0.37	100.00
+/tmp2/GUT_GENOME011264.gff	o__Bacteroidales (UID2716)	92	487	270	107	380	0	0	0	0	83.38	0.00	0.00

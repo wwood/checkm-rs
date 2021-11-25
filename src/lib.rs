@@ -181,16 +181,32 @@ pub struct GenomeQuality {
 
 impl CheckMResult {
     pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<GenomeQuality,()> {
-        let checkm_name = std::path::Path::new(fasta_path)
+        let checkm_name_stem = std::path::Path::new(fasta_path)
             .file_stem()
-            .expect(&format!("Failed to find file_stem for {}", fasta_path))
+            .expect(&format!("Failed to find file_stem for {}", fasta_path));
+        let checkm_name = checkm_name_stem
             .to_str()
             .expect(&format!("Failed to convert fasta file name to string: {}", fasta_path));
-        debug!("Retrieving checkm name {}",fasta_path);
-        debug!("{:?}",self.genome_to_quality);
+        debug!("Retrieving checkm name {}, derived from {}", checkm_name, fasta_path);
+        trace!("{:?}",self.genome_to_quality);
         match self.genome_to_quality.get(checkm_name) {
             Some(q) => Ok(*q),
-            None => Err(())
+            None => {
+                // Possibly the checkm file was created with absolute paths. Try
+                // that.
+                let checkm_parent = std::path::Path::new(fasta_path)
+                    .parent()
+                    .expect(&format!("Failed to find parent for {}", fasta_path));
+                let joined = checkm_parent.join(checkm_name_stem);
+                let checkm_name2 = joined
+                    .to_str()
+                    .expect(&format!("Failed to convert fasta file name to string: {}", fasta_path));
+                debug!("Retrieving absolute path checkm name {}, derived from {}", checkm_name2, fasta_path);
+                match self.genome_to_quality.get(checkm_name2) {
+                    Some(q) => Ok(*q),
+                    None => Err(())
+                }
+            }
         }
     }
 }
@@ -287,5 +303,19 @@ mod test {
                 Some(0.7),
                 None,
             ).unwrap());
+    }
+
+    #[test]
+    fn test_absolute_path_retrieval() {
+        init();
+        let checkm = CheckMTabTable::read_file_path(&"tests/data/checkm3.tsv");
+        assert_eq!(
+            Ok(GenomeQuality {
+                completeness: 0.9361,
+                contamination: 0.0037,
+                strain_heterogeneity: 1.0,
+            }),
+            checkm.retrieve_via_fasta_path("/tmp/GUT_GENOME006390.gff.fna")
+        );
     }
 }
