@@ -3,7 +3,7 @@ extern crate env_logger;
 extern crate log;
 
 use log::*;
-use std;
+
 use std::collections::BTreeMap;
 
 pub struct CheckM1TabTable {}
@@ -30,7 +30,7 @@ impl CheckM1TabTable {
             file_path,
             passes.len()
         );
-        return passes;
+        passes
     }
 
     pub fn read_file_path(file_path: &str) -> CheckMResult<CheckM1GenomeQuality> {
@@ -42,7 +42,7 @@ impl CheckM1TabTable {
         let mut total_seen = 0usize;
 
         for result in rdr
-            .expect(&format!("Failed to parse CheckM tab table {}", file_path))
+            .unwrap_or_else(|_| panic!("Failed to parse CheckM tab table {}", file_path))
             .records()
         {
             let res = result.expect("Parsing error in CheckM tab table file");
@@ -89,9 +89,9 @@ impl CheckM1TabTable {
             total_seen += 1;
         }
         debug!("Read in {} genomes from {}", total_seen, file_path);
-        return CheckMResult {
+        CheckMResult {
             genome_to_quality: qualities,
-        };
+        }
     }
 }
 
@@ -134,10 +134,10 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
                 .partial_cmp(&(q1.completeness() - 4. * q1.contamination()))
                 .unwrap()
         });
-        return genomes_and_qualities
+        genomes_and_qualities
             .into_iter()
             .map(|(genome, _)| genome)
-            .collect();
+            .collect()
     }
 
     pub fn order_genomes_by_completeness_minus_5contamination(&self) -> Vec<&String> {
@@ -153,10 +153,10 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
                 .partial_cmp(&(q1.completeness() - 5. * q1.contamination()))
                 .unwrap()
         });
-        return genomes_and_qualities
+        genomes_and_qualities
             .into_iter()
             .map(|(genome, _)| genome)
-            .collect();
+            .collect()
     }
 
     /// Map paths to FASTA paths to CheckM qualities, and return paths ordered
@@ -165,7 +165,7 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
     /// fractions e.g. 0.8 not 80.
     pub fn order_fasta_paths_by_completeness_minus_4contamination<'a>(
         &self,
-        genome_fasta_files: &Vec<&'a str>,
+        genome_fasta_files: &[&'a str],
         min_completeness: Option<f32>,
         max_contamination: Option<f32>,
     ) -> Result<Vec<&'a str>, String> {
@@ -191,7 +191,7 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
     /// fractions e.g. 0.8 not 80.
     pub fn order_fasta_paths_by_completeness_minus_5contamination<'a>(
         &self,
-        genome_fasta_files: &Vec<&'a str>,
+        genome_fasta_files: &[&'a str],
         min_completeness: Option<f32>,
         max_contamination: Option<f32>,
     ) -> Result<Vec<&'a str>, String> {
@@ -214,12 +214,12 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
     fn order_fasta_list<'a>(
         &self,
         key_to_order: &BTreeMap<&str, usize>,
-        genome_fasta_files: &Vec<&'a str>,
+        genome_fasta_files: &[&'a str],
         min_completeness: Option<f32>,
         max_contamination: Option<f32>,
     ) -> Result<Vec<&'a str>, String> {
         let mut fasta_and_order: Vec<(&str, usize)> = vec![];
-        for fasta_path in genome_fasta_files.into_iter() {
+        for fasta_path in genome_fasta_files.iter() {
             let checkm_name = std::path::Path::new(fasta_path)
                 .file_stem()
                 .unwrap()
@@ -246,7 +246,7 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
             }
         }
         fasta_and_order.sort_unstable_by(|a, b| a.1.cmp(&b.1));
-        return Ok(fasta_and_order.into_iter().map(|(g, _)| g).collect());
+        Ok(fasta_and_order.into_iter().map(|(g, _)| g).collect())
     }
 
     pub fn filter(&self, min_completeness: f32, max_contamination: f32) -> CheckMResult<T> {
@@ -257,19 +257,21 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
                 new.insert(g.clone().to_string(), *q);
             }
         }
-        return CheckMResult {
+        CheckMResult {
             genome_to_quality: new,
-        };
+        }
     }
 
-    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<T, ()> {
+    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<T, CheckMReadError> {
         let checkm_name_stem = std::path::Path::new(fasta_path)
             .file_stem()
-            .expect(&format!("Failed to find file_stem for {}", fasta_path));
-        let checkm_name = checkm_name_stem.to_str().expect(&format!(
-            "Failed to convert fasta file name to string: {}",
-            fasta_path
-        ));
+            .unwrap_or_else(|| panic!("Failed to find file_stem for {}", fasta_path));
+        let checkm_name = checkm_name_stem.to_str().unwrap_or_else(|| {
+            panic!(
+                "Failed to convert fasta file name to string: {}",
+                fasta_path
+            )
+        });
         debug!(
             "Retrieving checkm name {}, derived from {}",
             checkm_name, fasta_path
@@ -282,24 +284,37 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
                 // that.
                 let checkm_parent = std::path::Path::new(fasta_path)
                     .parent()
-                    .expect(&format!("Failed to find parent for {}", fasta_path));
+                    .unwrap_or_else(|| panic!("Failed to find parent for {}", fasta_path));
                 let joined = checkm_parent.join(checkm_name_stem);
-                let checkm_name2 = joined.to_str().expect(&format!(
-                    "Failed to convert fasta file name to string: {}",
-                    fasta_path
-                ));
+                let checkm_name2 = joined.to_str().unwrap_or_else(|| {
+                    panic!(
+                        "Failed to convert fasta file name to string: {}",
+                        fasta_path
+                    )
+                });
                 debug!(
                     "Retrieving absolute path checkm name {}, derived from {}",
                     checkm_name2, fasta_path
                 );
                 match self.genome_to_quality.get(checkm_name2) {
                     Some(q) => Ok(*q),
-                    None => Err(()),
+                    None => Err(CheckMReadError {}),
                 }
             }
         }
     }
 }
+
+#[derive(Debug, PartialEq)]
+pub struct CheckMReadError;
+
+impl std::fmt::Display for CheckMReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error reading CheckM file")
+    }
+}
+
+impl std::error::Error for CheckMReadError {}
 
 #[cfg(test)]
 mod test {
@@ -335,10 +350,9 @@ mod test {
             }),
             checkm.retrieve_via_fasta_path(&"/some/path/GUT_GENOME011264.gff.fna")
         );
-        assert_eq!(
-            Err(()),
-            checkm.retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna")
-        );
+        assert!(checkm
+            .retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna")
+            .is_err());
     }
 
     #[test]
