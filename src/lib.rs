@@ -13,9 +13,9 @@ impl CheckM1TabTable {
         file_path: &str,
         min_completeness: f32,
         max_contamination: f32,
-    ) -> Vec<String> {
+    ) -> Result<Vec<String>, CheckMReadError> {
         let mut passes = vec![];
-        let qualities = CheckM1TabTable::read_file_path(file_path);
+        let qualities = CheckM1TabTable::read_file_path(file_path)?;
         for (genome, quality) in qualities.genome_to_quality.iter() {
             trace!("Genome: {}, Quality: {:?}", genome, quality);
             if quality.completeness >= min_completeness
@@ -30,10 +30,12 @@ impl CheckM1TabTable {
             file_path,
             passes.len()
         );
-        passes
+        Ok(passes)
     }
 
-    pub fn read_file_path(file_path: &str) -> CheckMResult<CheckM1GenomeQuality> {
+    pub fn read_file_path(
+        file_path: &str,
+    ) -> Result<CheckMResult<CheckM1GenomeQuality>, CheckMReadError> {
         let mut qualities = BTreeMap::new();
         let rdr = csv::ReaderBuilder::new()
             .delimiter(b'\t')
@@ -41,17 +43,21 @@ impl CheckM1TabTable {
             .from_path(std::path::Path::new(file_path));
         let mut total_seen = 0usize;
 
-        for result in rdr
-            .unwrap_or_else(|_| panic!("Failed to parse CheckM tab table {}", file_path))
-            .records()
-        {
+        if rdr.is_err() {
+            return Err(CheckMReadError {
+                msg: format!("Failed to parse CheckM v1 genome quality {}", file_path),
+            });
+        }
+
+        for result in rdr.unwrap().records() {
             let res = result.expect("Parsing error in CheckM tab table file");
             if res.len() != 14 {
-                error!(
-                    "Parsing error in CheckM tab table file - didn't find 13 columns in line {:?}",
-                    res
-                );
-                std::process::exit(1);
+                return Err(CheckMReadError {
+                    msg: format!(
+                        "Parsing error in CheckM tab table file - didn't find 14 columns in line {:?}",
+                        res
+                    ),
+                });
             }
             let completeness: f32 = res[11]
                 .parse::<f32>()
@@ -78,20 +84,20 @@ impl CheckM1TabTable {
             ) {
                 None => {}
                 Some(_) => {
-                    error!(
-                        "The genome {} was found multiple times in the checkm file {}",
-                        res[0].to_string(),
-                        file_path
-                    );
-                    std::process::exit(1);
+                    return Err(CheckMReadError {
+                        msg: format!(
+                            "The genome {} was found multiple times in the checkm file {}",
+                            &res[0], file_path
+                        ),
+                    });
                 }
             };
             total_seen += 1;
         }
         debug!("Read in {} genomes from {}", total_seen, file_path);
-        CheckMResult {
+        Ok(CheckMResult {
             genome_to_quality: qualities,
-        }
+        })
     }
 }
 pub struct CheckM2QualityReport {}
@@ -176,12 +182,12 @@ impl CheckM2QualityReport {
             ) {
                 None => {}
                 Some(_) => {
-                    error!(
-                        "The genome {} was found multiple times in the checkm file {}",
-                        res[0].to_string(),
-                        file_path
-                    );
-                    std::process::exit(1);
+                    return Err(CheckMReadError {
+                        msg: format!(
+                            "The genome {} was found multiple times in the checkm file {}",
+                            &res[0], file_path
+                        ),
+                    });
                 }
             };
             total_seen += 1;
@@ -375,19 +381,24 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
         }
     }
 
-    pub fn retrieve_via_fasta_path(
-        &self,
-        fasta_path: &str,
-    ) -> Result<T, CheckMGenomeNotFoundError> {
-        let checkm_name_stem = std::path::Path::new(fasta_path)
-            .file_stem()
-            .unwrap_or_else(|| panic!("Failed to find file_stem for {}", fasta_path));
-        let checkm_name = checkm_name_stem.to_str().unwrap_or_else(|| {
-            panic!(
-                "Failed to convert fasta file name to string: {}",
-                fasta_path
-            )
-        });
+    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<T, CheckMRetrievalError> {
+        let checkm_name_stem_res = std::path::Path::new(fasta_path).file_stem();
+        if checkm_name_stem_res.is_none() {
+            return Err(CheckMRetrievalError {
+                msg: format!("Unable to find file_stem for {}", fasta_path),
+            });
+        }
+        let checkm_name_stem = checkm_name_stem_res.unwrap();
+        let checkm_name_res = checkm_name_stem.to_str();
+        if checkm_name_res.is_none() {
+            return Err(CheckMRetrievalError {
+                msg: format!(
+                    "Failed to convert fasta file name to string: {}",
+                    fasta_path
+                ),
+            });
+        }
+        let checkm_name = checkm_name_res.unwrap();
         debug!(
             "Retrieving checkm name {}, derived from {}",
             checkm_name, fasta_path
@@ -398,38 +409,49 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
             None => {
                 // Possibly the checkm file was created with absolute paths. Try
                 // that.
-                let checkm_parent = std::path::Path::new(fasta_path)
-                    .parent()
-                    .unwrap_or_else(|| panic!("Failed to find parent for {}", fasta_path));
-                let joined = checkm_parent.join(checkm_name_stem);
-                let checkm_name2 = joined.to_str().unwrap_or_else(|| {
-                    panic!(
-                        "Failed to convert fasta file name to string: {}",
-                        fasta_path
-                    )
-                });
+                let checkm_parent_res = std::path::Path::new(fasta_path).parent();
+                if checkm_parent_res.is_none() {
+                    return Err(CheckMRetrievalError {
+                        msg: format!("Unable to find parent of fasta path {}", fasta_path),
+                    });
+                };
+                let joined = checkm_parent_res.unwrap().join(checkm_name_stem);
+                let checkm_name2 = joined.to_str();
+                if checkm_name2.is_none() {
+                    return Err(CheckMRetrievalError {
+                        msg: format!("Unable to convert name {} to str", checkm_name),
+                    });
+                }
                 debug!(
                     "Retrieving absolute path checkm name {}, derived from {}",
-                    checkm_name2, fasta_path
+                    checkm_name2.unwrap(),
+                    fasta_path
                 );
-                match self.genome_to_quality.get(checkm_name2) {
+                match self.genome_to_quality.get(checkm_name2.unwrap()) {
                     Some(q) => Ok(*q),
-                    None => Err(CheckMGenomeNotFoundError {}),
+                    None => Err(CheckMRetrievalError {
+                        msg: format!(
+                            "Unable to find checkm name {} in checkm results",
+                            checkm_name
+                        ),
+                    }),
                 }
             }
         }
     }
 }
 #[derive(Debug, PartialEq)]
-pub struct CheckMGenomeNotFoundError {}
+pub struct CheckMRetrievalError {
+    msg: String,
+}
 
-impl std::fmt::Display for CheckMGenomeNotFoundError {
+impl std::fmt::Display for CheckMRetrievalError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Genome not found in CheckM file")
+        write!(f, "{}", self.msg)
     }
 }
 
-impl std::error::Error for CheckMGenomeNotFoundError {}
+impl std::error::Error for CheckMRetrievalError {}
 
 #[derive(Debug, PartialEq)]
 pub struct CheckMReadError {
@@ -438,7 +460,7 @@ pub struct CheckMReadError {
 
 impl std::fmt::Display for CheckMReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error reading CheckM file")
+        write!(f, "{}", self.msg)
     }
 }
 
@@ -463,6 +485,7 @@ mod test {
                 "GUT_GENOME011536.gff"
             ],
             CheckM1TabTable::good_quality_genome_names(&"tests/data/checkm.tsv", 0.56, 0.1)
+                .unwrap()
         )
     }
 
@@ -491,7 +514,7 @@ mod test {
     #[test]
     fn test_retrieve() {
         init();
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv").unwrap();
         assert_eq!(
             Ok(CheckM1GenomeQuality {
                 completeness: 83.38 / 100.,
@@ -508,7 +531,7 @@ mod test {
     #[test]
     fn test_ordering_4times() {
         init();
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv").unwrap();
         assert_eq!(
             vec![
                 "GUT_GENOME006390.gff",
@@ -519,7 +542,7 @@ mod test {
             ],
             checkm.order_genomes_by_completeness_minus_4contamination()
         );
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm2.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm2.tsv").unwrap();
         assert_eq!(
             vec![
                 "GUT_GENOME006390.gff",
@@ -536,7 +559,7 @@ mod test {
     fn test_ordering_5times() {
         init();
         // Cheating here a bit - same result as the minus_4times
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv").unwrap();
         assert_eq!(
             vec![
                 "GUT_GENOME006390.gff",
@@ -547,7 +570,7 @@ mod test {
             ],
             checkm.order_genomes_by_completeness_minus_5contamination()
         );
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm2.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm2.tsv").unwrap();
         assert_eq!(
             vec![
                 "GUT_GENOME006390.gff",
@@ -563,7 +586,7 @@ mod test {
     #[test]
     fn test_fasta_ordering_4times() {
         init();
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv").unwrap();
         assert_eq!(
             vec![
                 "/tmp/GUT_GENOME006390.gff.fna",
@@ -586,7 +609,7 @@ mod test {
                 )
                 .unwrap()
         );
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm2.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm2.tsv").unwrap();
         assert_eq!(
             vec![
                 "/tmp/GUT_GENOME006390.gff.fna",
@@ -614,7 +637,7 @@ mod test {
     #[test]
     fn test_fasta_ordering_4times_min_completeness() {
         init();
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv").unwrap();
         assert_eq!(
             vec![
                 "/tmp/GUT_GENOME006390.gff.fna",
@@ -640,7 +663,7 @@ mod test {
     #[test]
     fn test_absolute_path_retrieval() {
         init();
-        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm3.tsv");
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm3.tsv").unwrap();
         assert_eq!(
             Ok(CheckM1GenomeQuality {
                 completeness: 0.9361,
