@@ -94,6 +94,104 @@ impl CheckM1TabTable {
         }
     }
 }
+pub struct CheckM2QualityReport {}
+impl CheckM2QualityReport {
+    pub fn good_quality_genome_names(
+        file_path: &str,
+        min_completeness: f32,
+        max_contamination: f32,
+    ) -> Result<Vec<String>, CheckMReadError> {
+        let mut passes = vec![];
+        let qualities = CheckM2QualityReport::read_file_path(file_path)?;
+        for (genome, quality) in qualities.genome_to_quality.iter() {
+            trace!("Genome: {}, Quality: {:?}", genome, quality);
+            if quality.completeness >= min_completeness
+                && quality.contamination <= max_contamination
+            {
+                passes.push(genome.clone())
+            }
+        }
+        debug!(
+            "Read in {} genomes from {}, {} passed the quality thresholds",
+            qualities.genome_to_quality.len(),
+            file_path,
+            passes.len()
+        );
+        Ok(passes)
+    }
+
+    pub fn read_file_path(
+        file_path: &str,
+    ) -> Result<CheckMResult<CheckM2GenomeQuality>, CheckMReadError> {
+        let mut qualities = BTreeMap::new();
+        let rdr = csv::ReaderBuilder::new()
+            .delimiter(b'\t')
+            .has_headers(true)
+            .from_path(std::path::Path::new(file_path));
+        let mut total_seen = 0usize;
+
+        if rdr.is_err() {
+            return Err(CheckMReadError {
+                msg: format!("Failed to parse CheckM v2 genome quality {}", file_path),
+            });
+        }
+
+        for result in rdr.unwrap().records() {
+            let res = result.expect("Parsing error in CheckM qualities file");
+            //     1 Name
+            //     2 Completeness
+            //     3 Contamination
+            //     4 Completeness_Model_Used
+            //     5 Translation_Table_Used
+            //     6 Coding_Density
+            //     7 Contig_N50
+            //     8 Average_Gene_Length
+            //     9 Genome_Size
+            //    10 GC_Content
+            //    11 Total_Coding_Sequences
+            //    12 Additional_Notes
+            if res.len() != 12 {
+                return Err(CheckMReadError{
+                    msg: format!("Parsing error in CheckM qualities file - didn't find 12 columns in line {:?}", res)
+                });
+            }
+            let completeness: f32 = res[1]
+                .parse::<f32>()
+                .expect("Error parsing completeness in checkm tab table");
+            let contamination: f32 = res[2]
+                .parse::<f32>()
+                .expect("Error parsing contamination in checkm tab table");
+            trace!(
+                "For {}, found completeness {} and contamination {}",
+                &res[0],
+                completeness,
+                contamination
+            );
+            match qualities.insert(
+                res[0].to_string(),
+                CheckM2GenomeQuality {
+                    completeness: completeness / 100.,
+                    contamination: contamination / 100.,
+                },
+            ) {
+                None => {}
+                Some(_) => {
+                    error!(
+                        "The genome {} was found multiple times in the checkm file {}",
+                        res[0].to_string(),
+                        file_path
+                    );
+                    std::process::exit(1);
+                }
+            };
+            total_seen += 1;
+        }
+        debug!("Read in {} genomes from {}", total_seen, file_path);
+        Ok(CheckMResult {
+            genome_to_quality: qualities,
+        })
+    }
+}
 
 pub trait GenomeQuality {
     fn completeness(&self) -> f32;
@@ -107,11 +205,26 @@ pub struct CheckM1GenomeQuality {
     pub strain_heterogeneity: f32,
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct CheckM2GenomeQuality {
+    pub completeness: f32,
+    pub contamination: f32,
+}
+
 pub struct CheckMResult<T: GenomeQuality> {
     pub genome_to_quality: BTreeMap<String, T>,
 }
 
 impl GenomeQuality for CheckM1GenomeQuality {
+    fn completeness(&self) -> f32 {
+        self.completeness
+    }
+    fn contamination(&self) -> f32 {
+        self.contamination
+    }
+}
+
+impl GenomeQuality for CheckM2GenomeQuality {
     fn completeness(&self) -> f32 {
         self.completeness
     }
@@ -262,7 +375,10 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
         }
     }
 
-    pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<T, CheckMReadError> {
+    pub fn retrieve_via_fasta_path(
+        &self,
+        fasta_path: &str,
+    ) -> Result<T, CheckMGenomeNotFoundError> {
         let checkm_name_stem = std::path::Path::new(fasta_path)
             .file_stem()
             .unwrap_or_else(|| panic!("Failed to find file_stem for {}", fasta_path));
@@ -298,15 +414,27 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
                 );
                 match self.genome_to_quality.get(checkm_name2) {
                     Some(q) => Ok(*q),
-                    None => Err(CheckMReadError {}),
+                    None => Err(CheckMGenomeNotFoundError {}),
                 }
             }
         }
     }
 }
+#[derive(Debug, PartialEq)]
+pub struct CheckMGenomeNotFoundError {}
+
+impl std::fmt::Display for CheckMGenomeNotFoundError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Genome not found in CheckM file")
+    }
+}
+
+impl std::error::Error for CheckMGenomeNotFoundError {}
 
 #[derive(Debug, PartialEq)]
-pub struct CheckMReadError;
+pub struct CheckMReadError {
+    msg: String,
+}
 
 impl std::fmt::Display for CheckMReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -335,6 +463,28 @@ mod test {
                 "GUT_GENOME011536.gff"
             ],
             CheckM1TabTable::good_quality_genome_names(&"tests/data/checkm.tsv", 0.56, 0.1)
+        )
+    }
+
+    #[test]
+    fn test_checkm2_good_quality_genome_names() {
+        init();
+        assert_eq!(
+            Ok(vec!["UTC-1_IN_HT_bin.22".to_string(),]),
+            CheckM2QualityReport::good_quality_genome_names(
+                &"tests/data/checkm2/quality_report.tsv",
+                0.7,
+                0.1
+            )
+        );
+        let empty: Vec<String> = vec![];
+        assert_eq!(
+            Ok(empty),
+            CheckM2QualityReport::good_quality_genome_names(
+                &"tests/data/checkm2/quality_report.tsv",
+                0.75,
+                0.1
+            )
         )
     }
 
