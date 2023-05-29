@@ -130,37 +130,33 @@ impl CheckM2QualityReport {
         file_path: &str,
     ) -> Result<CheckMResult<CheckM2GenomeQuality>, CheckMReadError> {
         let mut qualities = BTreeMap::new();
-        let rdr = csv::ReaderBuilder::new()
+        let rdr_res = csv::ReaderBuilder::new()
             .delimiter(b'\t')
             .has_headers(true)
             .from_path(std::path::Path::new(file_path));
         let mut total_seen = 0usize;
 
-        if rdr.is_err() {
+        if rdr_res.is_err() {
             return Err(CheckMReadError {
                 msg: format!("Failed to parse CheckM v2 genome quality {}", file_path),
             });
         }
+        let mut rdr = rdr_res.unwrap();
 
-        for result in rdr.unwrap().records() {
+        // The number of columns can change, so just check the first 3 columns have the expected names
+        let headers = rdr.headers().unwrap().clone();
+        if &headers[0] != "Name" || &headers[1] != "Completeness" || &headers[2] != "Contamination"
+        {
+            return Err(CheckMReadError {
+                msg: format!(
+                    "Parsing error in CheckM2 qualities file - didn't find expected headers in line {:?}",
+                    headers
+                ),
+            });
+        }
+
+        for result in rdr.records() {
             let res = result.expect("Parsing error in CheckM qualities file");
-            //     1 Name
-            //     2 Completeness
-            //     3 Contamination
-            //     4 Completeness_Model_Used
-            //     5 Translation_Table_Used
-            //     6 Coding_Density
-            //     7 Contig_N50
-            //     8 Average_Gene_Length
-            //     9 Genome_Size
-            //    10 GC_Content
-            //    11 Total_Coding_Sequences
-            //    12 Additional_Notes
-            if res.len() != 12 {
-                return Err(CheckMReadError{
-                    msg: format!("Parsing error in CheckM qualities file - didn't find 12 columns in line {:?}", res)
-                });
-            }
             let completeness: f32 = res[1]
                 .parse::<f32>()
                 .expect("Error parsing completeness in checkm tab table");
@@ -509,6 +505,19 @@ mod test {
                 0.1
             )
         )
+    }
+
+    #[test]
+    fn test_checkm2_14column_format() {
+        init();
+        assert_eq!(
+            Ok(vec!["AAMD-1".to_string(),]),
+            CheckM2QualityReport::good_quality_genome_names(
+                &"tests/data/checkm2/quality_report2.tsv",
+                0.7,
+                0.1
+            )
+        );
     }
 
     #[test]
