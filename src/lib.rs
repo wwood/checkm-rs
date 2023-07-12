@@ -145,7 +145,12 @@ impl CheckM2QualityReport {
 
         // The number of columns can change, so just check the first 3 columns have the expected names
         let headers = rdr.headers().unwrap().clone();
-        if &headers[0] != "Name" || &headers[1] != "Completeness" || &headers[2] != "Contamination"
+        let completeness_choice = &headers[1] == "Completeness_General";
+        if &headers[0] != "Name"
+            || (&headers[1] != "Completeness" && !completeness_choice)
+            || &headers[2] != "Contamination"
+            || (&headers[3] != "Completeness_Specific" && completeness_choice)
+            || (&headers[4] != "Completeness_Model_Used" && completeness_choice)
         {
             return Err(CheckMReadError {
                 msg: format!(
@@ -157,9 +162,21 @@ impl CheckM2QualityReport {
 
         for result in rdr.records() {
             let res = result.expect("Parsing error in CheckM qualities file");
-            let completeness: f32 = res[1]
-                .parse::<f32>()
-                .expect("Error parsing completeness in checkm tab table");
+
+            let completeness: f32 = if completeness_choice {
+                if &res[4] == "Neural Network (Specific Model)" {
+                    // Completeness_Specific
+                    &res[3]
+                } else {
+                    // Completeness_General
+                    &res[1]
+                }
+            } else {
+                &res[1]
+            }
+            .parse::<f32>()
+            .expect("Error parsing completeness in checkm tab table");
+
             let contamination: f32 = res[2]
                 .parse::<f32>()
                 .expect("Error parsing contamination in checkm tab table");
@@ -514,6 +531,19 @@ mod test {
             Ok(vec!["AAMD-1".to_string(),]),
             CheckM2QualityReport::good_quality_genome_names(
                 &"tests/data/checkm2/quality_report2.tsv",
+                0.7,
+                0.1
+            )
+        );
+    }
+
+    #[test]
+    fn test_checkm2_13column_format() {
+        init();
+        assert_eq!(
+            Ok(vec!["genome.6".to_string(),]),
+            CheckM2QualityReport::good_quality_genome_names(
+                &"tests/data/checkm2/quality_report3.tsv",
                 0.7,
                 0.1
             )
