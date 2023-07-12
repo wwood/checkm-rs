@@ -164,12 +164,17 @@ impl CheckM2QualityReport {
             let res = result.expect("Parsing error in CheckM qualities file");
 
             let completeness: f32 = if completeness_choice {
-                if &res[4] == "Neural Network (Specific Model)" {
-                    // Completeness_Specific
-                    &res[3]
-                } else {
-                    // Completeness_General
-                    &res[1]
+                match &res[4] {
+                    "Neural Network (Specific Model)" => &res[3],
+                    "Gradient Boost (General Model)" => &res[1],
+                    _ => {
+                        return Err(CheckMReadError {
+                            msg: format!(
+                                "Parsing error in CheckM2 qualities file - didn't find expected model name in line {:?}",
+                                res
+                            ),
+                        });
+                    }
                 }
             } else {
                 &res[1]
