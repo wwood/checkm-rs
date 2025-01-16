@@ -259,11 +259,7 @@ impl GenomeQuality for CheckM2GenomeQuality {
 
 impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
     pub fn order_genomes_by_completeness_minus_4contamination(&self) -> Vec<&String> {
-        let mut genomes_and_qualities: Vec<_> = self
-            .genome_to_quality
-            .iter()
-            .map(|(genome, quality)| (genome, quality))
-            .collect();
+        let mut genomes_and_qualities: Vec<_> = self.genome_to_quality.iter().collect();
 
         // sort in reverse order
         genomes_and_qualities.sort_unstable_by(|(_, q1), (_, q2)| {
@@ -278,11 +274,7 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
     }
 
     pub fn order_genomes_by_completeness_minus_5contamination(&self) -> Vec<&String> {
-        let mut genomes_and_qualities: Vec<_> = self
-            .genome_to_quality
-            .iter()
-            .map(|(genome, quality)| (genome, quality))
-            .collect();
+        let mut genomes_and_qualities: Vec<_> = self.genome_to_quality.iter().collect();
 
         // sort in reverse order
         genomes_and_qualities.sort_unstable_by(|(_, q1), (_, q2)| {
@@ -400,7 +392,18 @@ impl<T: GenomeQuality + Copy + std::fmt::Debug> CheckMResult<T> {
     }
 
     pub fn retrieve_via_fasta_path(&self, fasta_path: &str) -> Result<T, CheckMRetrievalError> {
-        let checkm_name_stem_res = std::path::Path::new(fasta_path).file_stem();
+        let checkm_name_stem_res = if fasta_path.ends_with(".gz") {
+            let checkm_name_stem_gz_res = std::path::Path::new(fasta_path).file_stem();
+            if checkm_name_stem_gz_res.is_none() {
+                return Err(CheckMRetrievalError {
+                    msg: format!("Unable to find file_stem for gzipped file {}", fasta_path),
+                });
+            }
+            std::path::Path::new(checkm_name_stem_gz_res.unwrap()).file_stem()
+        } else {
+            std::path::Path::new(fasta_path).file_stem()
+        };
+
         if checkm_name_stem_res.is_none() {
             return Err(CheckMRetrievalError {
                 msg: format!("Unable to find file_stem for {}", fasta_path),
@@ -569,6 +572,57 @@ mod test {
         );
         assert!(checkm
             .retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna")
+            .is_err());
+    }
+
+    #[test]
+    fn test_retrieve_gzip() {
+        init();
+        let checkm = CheckM1TabTable::read_file_path(&"tests/data/checkm.tsv").unwrap();
+        assert_eq!(
+            Ok(CheckM1GenomeQuality {
+                completeness: 83.38 / 100.,
+                contamination: 0.,
+                strain_heterogeneity: 0.
+            }),
+            checkm.retrieve_via_fasta_path(&"/some/path/GUT_GENOME011264.gff.fna.gz")
+        );
+        assert!(checkm
+            .retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna.gz")
+            .is_err());
+    }
+
+    #[test]
+    fn test_retrieve_checkm2() {
+        init();
+        let checkm =
+            CheckM2QualityReport::read_file_path(&"tests/data/checkm2/quality_report.tsv").unwrap();
+        assert_eq!(
+            Ok(CheckM2GenomeQuality {
+                completeness: 70.17 / 100.,
+                contamination: 0.25 / 100.,
+            }),
+            checkm.retrieve_via_fasta_path(&"/some/path/UTC-1_IN_HT_bin.22.fna")
+        );
+        assert!(checkm
+            .retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna")
+            .is_err());
+    }
+
+    #[test]
+    fn test_retrieve_checkm2_gzip() {
+        init();
+        let checkm =
+            CheckM2QualityReport::read_file_path(&"tests/data/checkm2/quality_report.tsv").unwrap();
+        assert_eq!(
+            Ok(CheckM2GenomeQuality {
+                completeness: 70.17 / 100.,
+                contamination: 0.25 / 100.,
+            }),
+            checkm.retrieve_via_fasta_path(&"/some/path/UTC-1_IN_HT_bin.22.fna.gz")
+        );
+        assert!(checkm
+            .retrieve_via_fasta_path(&"/some/path/GUT_not_a_genome_GENOME011264.gff.fna.gz")
             .is_err());
     }
 
